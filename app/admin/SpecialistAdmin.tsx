@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
+import {
+  SpecialistTimeOff,
+  TimeOffBySpecialist,
+  WorkingDaysBySpecialist,
+  specialistIsTimeOffOnDate,
+  specialistWorksOnDate,
+} from "@/lib/availability";
 
 interface Service {
   id: string;
@@ -21,12 +28,34 @@ interface SpecialistServiceRow {
   service_id: string;
 }
 
+interface SpecialistWorkingDayRow {
+  specialist_id: string;
+  weekday: number;
+}
+
+const weekdayOptions = [
+  { value: 1, label: "ორშ" },
+  { value: 2, label: "სამ" },
+  { value: 3, label: "ოთხ" },
+  { value: 4, label: "ხუთ" },
+  { value: 5, label: "პარ" },
+  { value: 6, label: "შაბ" },
+  { value: 0, label: "კვი" },
+];
+
 const emptyForm = {
   name: "",
   active: true,
   sort_order: "1",
   serviceIds: [] as string[],
+  workingDays: [1, 2, 3, 4, 5, 6] as number[],
 };
+
+function formatDateString(date: Date) {
+  const offset = date.getTimezoneOffset();
+  const adjustedDate = new Date(date.getTime() - offset * 60 * 1000);
+  return adjustedDate.toISOString().split("T")[0];
+}
 
 export function SpecialistAdmin() {
   const [specialists, setSpecialists] = useState<Specialist[]>([]);
@@ -34,13 +63,28 @@ export function SpecialistAdmin() {
   const [serviceIdsBySpecialistId, setServiceIdsBySpecialistId] = useState<
     Record<string, string[]>
   >({});
+  const [workingDaysBySpecialist, setWorkingDaysBySpecialist] =
+    useState<WorkingDaysBySpecialist>({});
+  const [timeOffBySpecialist, setTimeOffBySpecialist] =
+    useState<TimeOffBySpecialist>({});
+  const [timeOffForm, setTimeOffForm] = useState({
+    start_date: "",
+    end_date: "",
+    reason: "",
+  });
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
 
   const fetchSpecialistData = useCallback(async () => {
-    const [specialistsResult, servicesResult, linksResult] = await Promise.all([
+    const [
+      specialistsResult,
+      servicesResult,
+      linksResult,
+      workingDaysResult,
+      timeOffResult,
+    ] = await Promise.all([
       supabase
         .from("specialists")
         .select("id, name, active, sort_order")
@@ -51,13 +95,26 @@ export function SpecialistAdmin() {
         .eq("active", true)
         .order("sort_order", { ascending: true }),
       supabase.from("specialist_services").select("specialist_id, service_id"),
+      supabase.from("specialist_working_days").select("specialist_id, weekday"),
+      supabase
+        .from("specialist_time_off")
+        .select("id, specialist_id, start_date, end_date, reason")
+        .order("start_date", { ascending: true }),
     ]);
 
-    if (specialistsResult.error || servicesResult.error || linksResult.error) {
+    if (
+      specialistsResult.error ||
+      servicesResult.error ||
+      linksResult.error ||
+      workingDaysResult.error ||
+      timeOffResult.error
+    ) {
       setLoadError(
         specialistsResult.error?.message ||
           servicesResult.error?.message ||
           linksResult.error?.message ||
+          workingDaysResult.error?.message ||
+          timeOffResult.error?.message ||
           "სპეციალისტები ვერ ჩაიტვირთა. გაუშვი supabase/add_specialists.sql."
       );
       return;
@@ -73,10 +130,31 @@ export function SpecialistAdmin() {
       return groups;
     }, {});
 
+    const workingDays = ((workingDaysResult.data || []) as SpecialistWorkingDayRow[])
+      .reduce<WorkingDaysBySpecialist>((groups, row) => {
+        groups[row.specialist_id] = [
+          ...(groups[row.specialist_id] || []),
+          row.weekday,
+        ];
+        return groups;
+      }, {});
+
+    const timeOff = ((timeOffResult.data || []) as SpecialistTimeOff[]).reduce<
+      TimeOffBySpecialist
+    >((groups, period) => {
+      groups[period.specialist_id] = [
+        ...(groups[period.specialist_id] || []),
+        period,
+      ];
+      return groups;
+    }, {});
+
     setLoadError("");
     setSpecialists(specialistsResult.data || []);
     setServices(servicesResult.data || []);
     setServiceIdsBySpecialistId(links);
+    setWorkingDaysBySpecialist(workingDays);
+    setTimeOffBySpecialist(timeOff);
   }, []);
 
   useEffect(() => {
@@ -94,6 +172,16 @@ export function SpecialistAdmin() {
         { event: "*", schema: "public", table: "specialist_services" },
         fetchSpecialistData
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "specialist_working_days" },
+        fetchSpecialistData
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "specialist_time_off" },
+        fetchSpecialistData
+      )
       .subscribe();
 
     return () => {
@@ -104,6 +192,7 @@ export function SpecialistAdmin() {
   const resetForm = () => {
     setEditingId(null);
     setForm(emptyForm);
+    setTimeOffForm({ start_date: "", end_date: "", reason: "" });
   };
 
   const startEdit = (specialist: Specialist) => {
@@ -113,6 +202,7 @@ export function SpecialistAdmin() {
       active: specialist.active,
       sort_order: String(specialist.sort_order ?? specialists.length + 1),
       serviceIds: serviceIdsBySpecialistId[specialist.id] || [],
+      workingDays: workingDaysBySpecialist[specialist.id] || [0, 1, 2, 3, 4, 5, 6],
     });
   };
 
@@ -123,6 +213,19 @@ export function SpecialistAdmin() {
         ? current.serviceIds.filter((item) => item !== id)
         : [...current.serviceIds, id],
     }));
+  };
+
+  const toggleWorkingDay = (weekday: number) => {
+    setForm((current) => {
+      const exists = current.workingDays.includes(weekday);
+
+      return {
+        ...current,
+        workingDays: exists
+          ? current.workingDays.filter((day) => day !== weekday)
+          : [...current.workingDays, weekday].sort((first, second) => first - second),
+      };
+    });
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -175,6 +278,34 @@ export function SpecialistAdmin() {
       }
     }
 
+    const { error: deleteWorkingDaysError } = await supabase
+      .from("specialist_working_days")
+      .delete()
+      .eq("specialist_id", specialistId);
+
+    if (deleteWorkingDaysError) {
+      setLoading(false);
+      showToast("შეცდომა: " + deleteWorkingDaysError.message, "error");
+      return;
+    }
+
+    if (form.workingDays.length) {
+      const { error: insertWorkingDaysError } = await supabase
+        .from("specialist_working_days")
+        .insert(
+          form.workingDays.map((weekday) => ({
+            specialist_id: specialistId,
+            weekday,
+          }))
+        );
+
+      if (insertWorkingDaysError) {
+        setLoading(false);
+        showToast("შეცდომა: " + insertWorkingDaysError.message, "error");
+        return;
+      }
+    }
+
     setLoading(false);
     showToast(editingId ? "სპეციალისტი განახლდა." : "სპეციალისტი დაემატა.", "success");
     resetForm();
@@ -215,6 +346,45 @@ export function SpecialistAdmin() {
     if (editingId === specialist.id) resetForm();
     fetchSpecialistData();
     showToast("სპეციალისტი წაიშალა.", "success");
+  };
+
+  const addTimeOff = async () => {
+    if (!editingId || !timeOffForm.start_date || !timeOffForm.end_date) return;
+
+    if (timeOffForm.end_date < timeOffForm.start_date) {
+      showToast("დასრულების თარიღი დაწყებაზე ადრე ვერ იქნება.", "error");
+      return;
+    }
+
+    const { error } = await supabase.from("specialist_time_off").insert({
+      specialist_id: editingId,
+      start_date: timeOffForm.start_date,
+      end_date: timeOffForm.end_date,
+      reason: timeOffForm.reason.trim() || null,
+    });
+
+    if (error) {
+      showToast("შეცდომა: " + error.message, "error");
+      return;
+    }
+
+    setTimeOffForm({ start_date: "", end_date: "", reason: "" });
+    fetchSpecialistData();
+    showToast("დასვენების პერიოდი დაემატა.", "success");
+  };
+
+  const deleteTimeOff = async (id?: string) => {
+    if (!id) return;
+
+    const { error } = await supabase.from("specialist_time_off").delete().eq("id", id);
+
+    if (error) {
+      showToast("შეცდომა: " + error.message, "error");
+      return;
+    }
+
+    fetchSpecialistData();
+    showToast("დასვენების პერიოდი წაიშალა.", "success");
   };
 
   return (
@@ -302,6 +472,117 @@ export function SpecialistAdmin() {
             </div>
           </div>
 
+          <div>
+            <p className="mb-2 text-[9px] font-bold uppercase tracking-[0.2em] text-[#7b8a67]">
+              სამუშაო დღეები
+            </p>
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+              {weekdayOptions.map((day) => {
+                const isSelected = form.workingDays.includes(day.value);
+
+                return (
+                  <button
+                    key={day.value}
+                    type="button"
+                    onClick={() => toggleWorkingDay(day.value)}
+                    className={`border px-2 py-2 text-[10px] font-black uppercase transition-colors ${
+                      isSelected
+                        ? "border-[#151716] bg-[#151716] text-white"
+                        : "border-[#dfe6d8] text-[#586256] hover:border-[#151716]"
+                    }`}
+                  >
+                    {day.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {editingId ? (
+            <div className="border border-[#dfe6d8] bg-[#f7f8f5] p-3">
+              <p className="mb-3 text-[9px] font-bold uppercase tracking-[0.2em] text-[#7b8a67]">
+                არ ყოფნის პერიოდი
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="border-b border-[#c9d2c3] pb-2">
+                  <span className="mb-1 block text-[9px] font-bold uppercase tracking-[0.2em] text-[#7b8a67]">
+                    დაწყება
+                  </span>
+                  <input
+                    type="date"
+                    value={timeOffForm.start_date}
+                    onChange={(event) =>
+                      setTimeOffForm((current) => ({
+                        ...current,
+                        start_date: event.target.value,
+                      }))
+                    }
+                    className="w-full bg-transparent text-sm font-bold focus:outline-none"
+                  />
+                </label>
+
+                <label className="border-b border-[#c9d2c3] pb-2">
+                  <span className="mb-1 block text-[9px] font-bold uppercase tracking-[0.2em] text-[#7b8a67]">
+                    დასრულება
+                  </span>
+                  <input
+                    type="date"
+                    value={timeOffForm.end_date}
+                    onChange={(event) =>
+                      setTimeOffForm((current) => ({
+                        ...current,
+                        end_date: event.target.value,
+                      }))
+                    }
+                    className="w-full bg-transparent text-sm font-bold focus:outline-none"
+                  />
+                </label>
+              </div>
+
+              <input
+                type="text"
+                value={timeOffForm.reason}
+                onChange={(event) =>
+                  setTimeOffForm((current) => ({
+                    ...current,
+                    reason: event.target.value,
+                  }))
+                }
+                placeholder="მიზეზი, მაგალითად პირადი საქმე"
+                className="mt-3 w-full border-b border-[#c9d2c3] bg-transparent pb-2 text-sm font-bold focus:outline-none"
+              />
+
+              <button
+                type="button"
+                onClick={addTimeOff}
+                className="mt-3 border border-[#151716] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#151716] hover:bg-[#151716] hover:text-white"
+              >
+                დამატება
+              </button>
+
+              <div className="mt-3 space-y-2">
+                {(timeOffBySpecialist[editingId] || []).map((period) => (
+                  <div
+                    key={period.id}
+                    className="flex items-center justify-between gap-3 border border-[#dfe6d8] bg-white px-3 py-2 text-xs font-bold text-[#586256]"
+                  >
+                    <span>
+                      {period.start_date} - {period.end_date}
+                      {period.reason ? ` · ${period.reason}` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => deleteTimeOff(period.id)}
+                      className="text-[10px] font-black uppercase text-red-600"
+                    >
+                      წაშლა
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <label className="flex items-center gap-3 text-sm font-bold text-[#586256]">
             <input
               type="checkbox"
@@ -338,12 +619,42 @@ export function SpecialistAdmin() {
             const specialistServices = services.filter((service) =>
               specialistServiceIds.includes(service.id)
             );
+            const todayStr = formatDateString(new Date());
+            const specialistTimeOff = timeOffBySpecialist[specialist.id] || [];
+            const activeTimeOff = specialistTimeOff.find(
+              (period) => period.start_date <= todayStr && period.end_date >= todayStr
+            );
+            const upcomingTimeOff = specialistTimeOff.find(
+              (period) => period.end_date >= todayStr
+            );
+            const activeReason = activeTimeOff?.reason?.trim() || "არ არის ადგილზე";
+            const upcomingReason = upcomingTimeOff?.reason?.trim() || "არ არის ადგილზე";
+            const isOnVacation = specialistIsTimeOffOnDate(
+              specialist.id,
+              timeOffBySpecialist,
+              todayStr
+            );
+            const worksToday = specialistWorksOnDate(
+              specialist.id,
+              new Date(),
+              workingDaysBySpecialist,
+              timeOffBySpecialist,
+              todayStr
+            );
+            const workingDayLabels = (workingDaysBySpecialist[specialist.id] || [])
+              .map(
+                (weekday) =>
+                  weekdayOptions.find((option) => option.value === weekday)?.label
+              )
+              .filter(Boolean);
 
             return (
               <div
                 key={specialist.id}
                 className={`grid gap-4 border p-4 md:grid-cols-[56px_1fr_auto] md:items-center ${
-                  specialist.active
+                  isOnVacation || !worksToday
+                    ? "border-[#dfe6d8] bg-[#f2f5ee]"
+                    : specialist.active
                     ? "border-[#dfe6d8]"
                     : "border-[#dfe6d8] bg-[#f2f5ee] opacity-70"
                 }`}
@@ -356,10 +667,30 @@ export function SpecialistAdmin() {
                   <h3 className="text-base font-black text-[#151716]">
                     {specialist.name}
                   </h3>
+                  {isOnVacation ? (
+                    <p className="mt-2 inline-block bg-[#151716] px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-white">
+                      {activeReason}
+                    </p>
+                  ) : null}
+                  {!activeTimeOff && upcomingTimeOff ? (
+                    <p className="mt-2 inline-block bg-[#dfe8d5] px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-[#151716]">
+                      {upcomingReason}: {upcomingTimeOff.start_date} - {upcomingTimeOff.end_date}
+                    </p>
+                  ) : null}
+                  {!isOnVacation && !worksToday ? (
+                    <p className="mt-2 inline-block border border-[#c9d2c3] bg-white px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-[#586256]">
+                      დღეს არ მუშაობს
+                    </p>
+                  ) : null}
                   <p className="mt-2 text-sm leading-6 text-[#586256]">
                     {specialistServices.length
                       ? specialistServices.map((service) => service.title).join(", ")
                       : "სერვისები არ არის არჩეული"}
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-[#7b8a67]">
+                    {workingDayLabels.length
+                      ? `სამუშაო დღეები: ${workingDayLabels.join(", ")}`
+                      : "სამუშაო დღეები არ არის არჩეული"}
                   </p>
                 </div>
 

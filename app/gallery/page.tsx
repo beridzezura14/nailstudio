@@ -1,7 +1,23 @@
+import type { Metadata } from "next";
 import GalleryGrid from "../components/gallery/GalleryGrid";
 import GalleryHero from "../components/gallery/GalleryHero";
 import Header from "../components/Header";
 import SiteFooter from "../components/SiteFooter";
+
+export const metadata: Metadata = {
+  title: "გალერეა",
+  description:
+    "ფრჩხილის სტუდიის ნამუშევრები: მანიკური, პედიკური, გელ-ლაქი, ფორმა და ფრჩხილის დეტალები.",
+  alternates: {
+    canonical: "/gallery",
+  },
+  openGraph: {
+    title: "გალერეა | ფრჩხილის სტუდია",
+    description:
+      "დაათვალიერე ფრჩხილის სტუდიის ნამუშევრები და დაჯავშნე ვიზიტი ონლაინ.",
+    url: "/gallery",
+  },
+};
 
 export default function GalleryPage() {
   return (

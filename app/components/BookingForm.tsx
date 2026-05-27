@@ -4,6 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { AvailableSlot, getAvailableSlots } from "@/lib/scheduling";
 import { showToast } from "@/lib/toast";
+import { getBookingErrorMessage } from "@/lib/booking-errors";
+import {
+  SpecialistTimeOff,
+  TimeOffBySpecialist,
+  WorkingDaysBySpecialist,
+  specialistIsTimeOffOnDate,
+  specialistWorksOnDate,
+} from "@/lib/availability";
 
 const WEEKDAYS = ["ორშ", "სამ", "ოთხ", "ხუთ", "პარ", "შაბ", "კვი"];
 const MONTH_NAMES = [
@@ -43,6 +51,11 @@ interface SpecialistServiceRow {
   service_id: string;
 }
 
+interface SpecialistWorkingDayRow {
+  specialist_id: string;
+  weekday: number;
+}
+
 interface BookingFormProps {
   serviceId?: string | null;
   serviceIds?: string[];
@@ -55,6 +68,11 @@ function formatDateString(date: Date) {
   const offset = date.getTimezoneOffset();
   const adjustedDate = new Date(date.getTime() - offset * 60 * 1000);
   return adjustedDate.toISOString().split("T")[0];
+}
+
+function parseDateString(dateString: string) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(year, month - 1, day);
 }
 
 function formatDuration(minutes: number) {
@@ -84,6 +102,10 @@ export default function BookingForm({
   const [specialistServiceIds, setSpecialistServiceIds] = useState<
     Record<string, string[]>
   >({});
+  const [workingDaysBySpecialist, setWorkingDaysBySpecialist] =
+    useState<WorkingDaysBySpecialist>({});
+  const [timeOffBySpecialist, setTimeOffBySpecialist] =
+    useState<TimeOffBySpecialist>({});
   const [selectedSpecialistId, setSelectedSpecialistId] = useState(
     preferredSpecialistId || ""
   );
@@ -101,20 +123,45 @@ export default function BookingForm({
     (sum, service) => sum + service.duration_minutes,
     0
   );
+  const selectedDateSpecialistAvailable = useMemo(() => {
+    if (!selectedSpecialistId || !selectedDateStr) return false;
+
+    return specialistWorksOnDate(
+      selectedSpecialistId,
+      parseDateString(selectedDateStr),
+      workingDaysBySpecialist,
+      timeOffBySpecialist,
+      selectedDateStr
+    );
+  }, [
+    selectedDateStr,
+    selectedSpecialistId,
+    timeOffBySpecialist,
+    workingDaysBySpecialist,
+  ]);
   const availableSlots = useMemo(
     () =>
-      totalDuration
+      totalDuration && selectedDateSpecialistAvailable
         ? getAvailableSlots(dayBookings, totalDuration, undefined, selectedDateStr)
         : [],
-    [dayBookings, selectedDateStr, totalDuration]
+    [dayBookings, selectedDateSpecialistAvailable, selectedDateStr, totalDuration]
   );
   const eligibleSpecialists = useMemo(
     () =>
       specialists.filter((specialist) => {
         const serviceIdsForSpecialist = specialistServiceIds[specialist.id] || [];
-        return selectedServiceIds.every((id) => serviceIdsForSpecialist.includes(id));
+        const isOnVacationToday = specialistIsTimeOffOnDate(
+          specialist.id,
+          timeOffBySpecialist,
+          formatDateString(new Date())
+        );
+
+        return (
+          !isOnVacationToday &&
+          selectedServiceIds.every((id) => serviceIdsForSpecialist.includes(id))
+        );
       }),
-    [selectedServiceIds, specialistServiceIds, specialists]
+    [selectedServiceIds, specialistServiceIds, specialists, timeOffBySpecialist]
   );
 
   const today = new Date();
@@ -220,13 +267,18 @@ export default function BookingForm({
   );
 
   const fetchSpecialists = useCallback(async () => {
-    const [specialistsResult, linksResult] = await Promise.all([
+    const [specialistsResult, linksResult, workingDaysResult, timeOffResult] =
+      await Promise.all([
       supabase
         .from("specialists")
         .select("id, name")
         .eq("active", true)
         .order("sort_order", { ascending: true }),
       supabase.from("specialist_services").select("specialist_id, service_id"),
+      supabase.from("specialist_working_days").select("specialist_id, weekday"),
+      supabase
+        .from("specialist_time_off")
+        .select("id, specialist_id, start_date, end_date, reason"),
     ]);
 
     if (specialistsResult.error || linksResult.error) return;
@@ -241,8 +293,29 @@ export default function BookingForm({
       return groups;
     }, {});
 
+    const workingDays = ((workingDaysResult.data || []) as SpecialistWorkingDayRow[])
+      .reduce<WorkingDaysBySpecialist>((groups, row) => {
+        groups[row.specialist_id] = [
+          ...(groups[row.specialist_id] || []),
+          row.weekday,
+        ];
+        return groups;
+      }, {});
+
+    const timeOff = ((timeOffResult.data || []) as SpecialistTimeOff[]).reduce<
+      TimeOffBySpecialist
+    >((groups, period) => {
+      groups[period.specialist_id] = [
+        ...(groups[period.specialist_id] || []),
+        period,
+      ];
+      return groups;
+    }, {});
+
     setSpecialists(specialistsResult.data || []);
     setSpecialistServiceIds(links);
+    setWorkingDaysBySpecialist(workingDays);
+    setTimeOffBySpecialist(timeOff);
   }, []);
 
   useEffect(() => {
@@ -268,6 +341,20 @@ export default function BookingForm({
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "specialist_services" },
+        () => {
+          fetchSpecialists();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "specialist_working_days" },
+        () => {
+          fetchSpecialists();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "specialist_time_off" },
         () => {
           fetchSpecialists();
         }
@@ -326,6 +413,13 @@ export default function BookingForm({
   useEffect(() => {
     if (!selectedDateStr) return;
 
+    if (!selectedDateSpecialistAvailable) {
+      setSelectedDateStr("");
+      setSelectedSlot(null);
+      setCurrentStep(1);
+      return;
+    }
+
     fetchDayBookings(selectedDateStr);
 
     const channel = supabase
@@ -354,7 +448,7 @@ export default function BookingForm({
       window.clearInterval(refreshInterval);
       window.removeEventListener("focus", refreshOnFocus);
     };
-  }, [fetchDayBookings, selectedDateStr]);
+  }, [fetchDayBookings, selectedDateSpecialistAvailable, selectedDateStr]);
 
   useEffect(() => {
     fetchMonthBookings(currentDate);
@@ -442,6 +536,14 @@ export default function BookingForm({
       (slot) => slot.start === selectedSlot.start && slot.end === selectedSlot.end
     );
 
+    if (!selectedDateSpecialistAvailable) {
+      showToast("სპეციალისტი არჩეულ დღეს ხელმისაწვდომი არ არის.", "error");
+      setSelectedDateStr("");
+      setSelectedSlot(null);
+      setCurrentStep(1);
+      return;
+    }
+
     if (!isSelectedSlotAvailable) {
       showToast("არჩეული დრო უკვე გასულია ან აღარ არის თავისუფალი. აირჩიე სხვა დრო.", "error");
       setSelectedSlot(null);
@@ -487,7 +589,15 @@ export default function BookingForm({
     setLoading(false);
 
     if (error) {
-      showToast("შეცდომაა: " + error.message, "error");
+      showToast(getBookingErrorMessage(error.message), "error");
+      if (
+        error.message.includes("specialist is unavailable on this date") ||
+        error.message.includes("specialist is not working on this weekday")
+      ) {
+        setSelectedDateStr("");
+        setSelectedSlot(null);
+        setCurrentStep(1);
+      }
       return;
     }
 
@@ -684,6 +794,22 @@ export default function BookingForm({
                 const dateStr = formatDateString(date);
                 const isPast = date < today;
                 const isSelected = selectedDateStr === dateStr;
+                const specialistIsOnVacation =
+                  !!selectedSpecialistId &&
+                  specialistIsTimeOffOnDate(
+                    selectedSpecialistId,
+                    timeOffBySpecialist,
+                    dateStr
+                  );
+                const specialistIsAvailable =
+                  !selectedSpecialistId ||
+                  specialistWorksOnDate(
+                    selectedSpecialistId,
+                    date,
+                    workingDaysBySpecialist,
+                    timeOffBySpecialist,
+                    dateStr
+                  );
                 const dateBookings = monthBookings[dateStr] || [];
                 const dayHasAvailableSlot =
                   totalDuration > 0 &&
@@ -691,7 +817,11 @@ export default function BookingForm({
                 const isUnavailable =
                   monthBookingsLoaded && totalDuration > 0 && !dayHasAvailableSlot;
                 const isDisabled =
-                  isPast || totalDuration === 0 || !selectedSpecialistId || isUnavailable;
+                  isPast ||
+                  totalDuration === 0 ||
+                  !selectedSpecialistId ||
+                  !specialistIsAvailable ||
+                  isUnavailable;
 
                 return (
                   <button
@@ -704,14 +834,24 @@ export default function BookingForm({
                       setSelectedSlot(null);
                       setCurrentStep(2);
                     }}
-                    className={`relative flex h-10 w-full items-center justify-center bg-white text-sm font-bold transition-all sm:h-12 ${
+                    className={`relative flex h-12 w-full flex-col items-center justify-center gap-0.5 bg-white text-sm font-bold transition-all sm:h-14 ${
                       isDisabled
-                        ? "cursor-not-allowed bg-[#f2f5ee] text-[#c9d2c3]/70 line-through"
+                        ? "cursor-not-allowed bg-[#f2f5ee] text-[#9aa697]"
                         : "text-[#151716] hover:bg-[#edf3e8]"
                     } ${isSelected ? "!bg-[#151716] text-white" : ""}`}
-                    title={isUnavailable ? "არჩეული სერვისებისთვის თავისუფალი დრო არ არის" : undefined}
+                    title={
+                      !specialistIsAvailable
+                        ? specialistIsOnVacation
+                          ? "სპეციალისტი ამ დღეს ხელმისაწვდომი არ არის"
+                          : "სპეციალისტი ამ დღეს არ მუშაობს"
+                        : isUnavailable
+                          ? "არჩეული სერვისებისთვის თავისუფალი დრო არ არის"
+                          : undefined
+                    }
                   >
-                    {date.getDate()}
+                    <span className={isDisabled ? "line-through" : ""}>
+                      {date.getDate()}
+                    </span>
                     {!isDisabled && monthBookingsLoaded ? (
                       <span className="absolute bottom-1 h-1 w-1 rounded-full bg-green-700" />
                     ) : null}

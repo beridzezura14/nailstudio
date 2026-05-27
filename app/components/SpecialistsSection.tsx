@@ -2,11 +2,22 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import {
+  SpecialistTimeOff,
+  TimeOffBySpecialist,
+  specialistIsTimeOffOnDate,
+} from "@/lib/availability";
 import { supabase } from "@/lib/supabase";
 
 interface Specialist {
   id: string;
   name: string;
+}
+
+function formatDateString(date: Date) {
+  const offset = date.getTimezoneOffset();
+  const adjustedDate = new Date(date.getTime() - offset * 60 * 1000);
+  return adjustedDate.toISOString().split("T")[0];
 }
 
 const specialistImages = [
@@ -17,8 +28,15 @@ const specialistImages = [
 
 export default function SpecialistsSection() {
   const [specialists, setSpecialists] = useState<Specialist[]>([]);
+  const [timeOffBySpecialist, setTimeOffBySpecialist] =
+    useState<TimeOffBySpecialist>({});
+  const todayStr = formatDateString(new Date());
 
   const handleSpecialistSelect = (specialistId: string) => {
+    if (specialistIsTimeOffOnDate(specialistId, timeOffBySpecialist, todayStr)) {
+      return;
+    }
+
     window.dispatchEvent(
       new CustomEvent("nail-studio:book-specialist", {
         detail: { specialistId },
@@ -28,14 +46,31 @@ export default function SpecialistsSection() {
 
   useEffect(() => {
     const fetchSpecialists = async () => {
-      const { data, error } = await supabase
-        .from("specialists")
-        .select("id, name")
-        .eq("active", true)
-        .order("sort_order", { ascending: true });
+      const [specialistsResult, timeOffResult] = await Promise.all([
+        supabase
+          .from("specialists")
+          .select("id, name")
+          .eq("active", true)
+          .order("sort_order", { ascending: true }),
+        supabase
+          .from("specialist_time_off")
+          .select("id, specialist_id, start_date, end_date, reason"),
+      ]);
 
-      if (error) return;
-      setSpecialists(data || []);
+      if (specialistsResult.error) return;
+
+      const timeOff = ((timeOffResult.data || []) as SpecialistTimeOff[]).reduce<
+        TimeOffBySpecialist
+      >((groups, period) => {
+        groups[period.specialist_id] = [
+          ...(groups[period.specialist_id] || []),
+          period,
+        ];
+        return groups;
+      }, {});
+
+      setSpecialists(specialistsResult.data || []);
+      setTimeOffBySpecialist(timeOff);
     };
 
     fetchSpecialists();
@@ -45,6 +80,11 @@ export default function SpecialistsSection() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "specialists" },
+        fetchSpecialists
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "specialist_time_off" },
         fetchSpecialists
       )
       .subscribe();
@@ -82,25 +122,49 @@ export default function SpecialistsSection() {
               specialists.length === 1 ? "md:grid-cols-1" : "md:grid-cols-2"
             }`}
           >
-            {specialists.map((specialist, index) => (
-              <button
-                key={specialist.id}
-                type="button"
-                onClick={() => handleSpecialistSelect(specialist.id)}
-                title="არჩევა"
-                className="group border border-[#dfe6d8] bg-white text-left transition-all hover:-translate-y-1 hover:border-[#151716] hover:shadow-[0_18px_55px_rgba(21,23,22,0.12)] focus:outline-none focus:ring-2 focus:ring-[#151716] cursor-pointer"
-              >
+            {specialists.map((specialist, index) => {
+              const isOnVacation = specialistIsTimeOffOnDate(
+                specialist.id,
+                timeOffBySpecialist,
+                todayStr
+              );
+
+              return (
+                <button
+                  key={specialist.id}
+                  type="button"
+                  disabled={isOnVacation}
+                  onClick={() => handleSpecialistSelect(specialist.id)}
+                  title={isOnVacation ? "მიუწვდომელია" : "არჩევა"}
+                  className={`group border text-left transition-all focus:outline-none focus:ring-2 focus:ring-[#151716] ${
+                    isOnVacation
+                      ? "cursor-not-allowed border-[#dfe6d8] bg-[#f2f5ee] opacity-70"
+                      : "cursor-pointer border-[#dfe6d8] bg-white hover:-translate-y-1 hover:border-[#151716] hover:shadow-[0_18px_55px_rgba(21,23,22,0.12)]"
+                  }`}
+                >
                 <div className="relative aspect-[4/5] overflow-hidden sm:aspect-[5/4]">
                   <Image
                     src={specialistImages[index % specialistImages.length]}
                     alt={`${specialist.name} სპეციალისტი`}
                     fill
                     sizes="(min-width: 768px) 50vw, 100vw"
-                    className="object-cover transition-transform duration-500 group-hover:scale-105"
+                    className={`object-cover transition-transform duration-500 ${
+                      isOnVacation ? "grayscale" : "group-hover:scale-105"
+                    }`}
                   />
-                  <div className="absolute inset-0 grid place-items-center bg-[#151716]/0 transition-colors group-hover:bg-[#151716]/42">
-                    <span className="font-caps translate-y-2 border border-white bg-white px-5 py-3 text-[10px] font-black uppercase tracking-[0.28em] text-[#151716] opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100">
-                      არჩევა
+                  <div
+                    className={`absolute inset-0 grid place-items-center transition-colors ${
+                      isOnVacation ? "bg-[#151716]/38" : "bg-[#151716]/0 group-hover:bg-[#151716]/42"
+                    }`}
+                  >
+                    <span
+                      className={`font-caps border border-white bg-white px-5 py-3 text-[10px] font-black uppercase tracking-[0.28em] text-[#151716] transition-all ${
+                        isOnVacation
+                          ? "opacity-100"
+                          : "translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100"
+                      }`}
+                    >
+                      {isOnVacation ? "მიუწვდომელია" : "არჩევა"}
                     </span>
                   </div>
                 </div>
@@ -109,9 +173,15 @@ export default function SpecialistsSection() {
                   <p className="mt-2 text-sm font-bold text-[#586256]">
                     ფრჩხილის მოვლის სპეციალისტი
                   </p>
+                  {isOnVacation ? (
+                    <p className="mt-3 inline-block bg-[#151716] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-white">
+                      დროებით მიუწვდომელია
+                    </p>
+                  ) : null}
                 </div>
               </button>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="border border-[#dfe6d8] bg-white p-5 text-sm font-bold text-[#586256]">
