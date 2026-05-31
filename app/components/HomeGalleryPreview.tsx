@@ -25,7 +25,7 @@ export default function HomeGalleryPreview() {
             <p className="mb-4 text-xs font-black uppercase tracking-[0.34em] text-[#7b8a67]">
               გალერეა
             </p>
-            <h2 className="text-4xl font-black uppercase leading-none tracking-normal sm:text-5xl md:text-6xl">
+            <h2 className="text-3xl font-black uppercase leading-none tracking-normal sm:text-4xl md:text-5xl">
               ნამუშევრები
             </h2>
           </div>

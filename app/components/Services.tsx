@@ -177,7 +177,7 @@ export default function Services() {
               სერვისები
             </p>
 
-            <h2 className="text-5xl font-black uppercase leading-[0.9] tracking-normal md:text-7xl">
+            <h2 className="text-3xl font-black uppercase leading-[0.9] tracking-normal sm:text-4xl md:text-5xl">
               სილამაზის მენიუ
             </h2>
           </div>
@@ -209,7 +209,7 @@ export default function Services() {
                   </p>
 
                   <div>
-                    <h3 className="text-3xl font-black uppercase tracking-normal md:text-4xl">
+                    <h3 className="text-2xl font-black uppercase tracking-normal md:text-3xl">
                       {service.title}
                     </h3>
 

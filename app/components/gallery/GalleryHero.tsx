@@ -7,7 +7,7 @@ export default function GalleryHero() {
         <p className="mb-4 text-xs font-black uppercase tracking-[0.34em] text-[#7b8a67]">
           გალერეა
         </p>
-        <h1 className="text-4xl font-black uppercase leading-none tracking-normal sm:text-6xl md:text-7xl">
+        <h1 className="text-3xl font-black uppercase leading-none tracking-normal sm:text-5xl md:text-6xl">
           ნამუშევრები და განწყობა
         </h1>
       </div>

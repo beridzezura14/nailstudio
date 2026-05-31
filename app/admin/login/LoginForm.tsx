@@ -71,7 +71,7 @@ export default function LoginForm() {
           <p className="mb-2 text-[10px] font-black uppercase tracking-[0.32em] text-[#7b8a67]">
             ადმინი
           </p>
-          <h1 className="text-3xl font-black uppercase tracking-normal">
+          <h1 className="text-2xl font-black uppercase tracking-normal">
             შესვლა
           </h1>
         </div>

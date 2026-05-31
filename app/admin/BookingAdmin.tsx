@@ -47,6 +47,8 @@ const BOOKING_SOURCE_OPTIONS = [
   { value: "other", label: "სხვა" },
 ];
 
+const ARCHIVE_PAGE_SIZE = 10;
+
 interface Booking {
   id: string;
   client_name: string;
@@ -199,8 +201,11 @@ export function BookingAdmin() {
     formatDateString(new Date())
   );
   const [openBookingMenuId, setOpenBookingMenuId] = useState<string | null>(null);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [archiveSearch, setArchiveSearch] = useState("");
+  const [archivePage, setArchivePage] = useState(1);
   const [activeAdminSection, setActiveAdminSection] = useState<
-    "booking" | "service" | "specialist"
+    "booking" | "service" | "specialist" | "archive"
   >(
     "booking"
   );
@@ -234,6 +239,59 @@ export function BookingAdmin() {
         (booking) => booking.status !== "completed" && booking.status !== "archived"
       ),
     [bookings]
+  );
+  const completedBookings = useMemo(
+    () =>
+      bookings
+        .filter(
+          (booking) => booking.status === "completed" || booking.status === "archived"
+        )
+        .sort((first, second) => {
+          const firstKey = `${first.booking_date} ${first.start_time}`;
+          const secondKey = `${second.booking_date} ${second.start_time}`;
+          return secondKey.localeCompare(firstKey);
+        }),
+    [bookings]
+  );
+  const filteredCompletedBookings = useMemo(() => {
+    const query = archiveSearch.trim().toLowerCase();
+    if (!query) return completedBookings;
+
+    return completedBookings.filter((booking) => {
+      const bookingServices = bookingServicesByBookingId[booking.id] || [];
+      const specialistName =
+        specialists.find((specialist) => specialist.id === booking.specialist_id)?.name ||
+        "";
+      const searchableText = [
+        booking.booking_date,
+        booking.start_time,
+        booking.end_time,
+        booking.client_name,
+        booking.client_phone,
+        booking.booking_source,
+        specialistName,
+        ...bookingServices.map((service) => service.title),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(query);
+    });
+  }, [
+    archiveSearch,
+    bookingServicesByBookingId,
+    completedBookings,
+    specialists,
+  ]);
+  const archivePageCount = Math.max(
+    1,
+    Math.ceil(filteredCompletedBookings.length / ARCHIVE_PAGE_SIZE)
+  );
+  const currentArchivePage = Math.min(archivePage, archivePageCount);
+  const paginatedCompletedBookings = filteredCompletedBookings.slice(
+    (currentArchivePage - 1) * ARCHIVE_PAGE_SIZE,
+    currentArchivePage * ARCHIVE_PAGE_SIZE
   );
 
   const fetchBookings = useCallback(async () => {
@@ -518,12 +576,6 @@ export function BookingAdmin() {
   const selectedDayBookings = bookingsByDate[selectedScheduleDateStr] || [];
   const selectedDayOverdueBookings = selectedDayBookings.filter((booking) =>
     isBookingOverdue(booking, todayStr, currentMinutes)
-  );
-  const selectedDayCompletedBookings = bookings.filter(
-    (booking) =>
-      booking.booking_date === selectedScheduleDateStr &&
-      (!overviewSpecialistId || booking.specialist_id === overviewSpecialistId) &&
-      (booking.status === "completed" || booking.status === "archived")
   );
   const selectedScheduleSpecialistAvailable =
     !!overviewSpecialistId &&
@@ -920,7 +972,7 @@ export function BookingAdmin() {
     <main className="min-h-screen w-full bg-[#eef2ea] text-[#151716]">
       <div className="min-h-screen">
         <header className="sticky top-0 z-40 border-b border-[#c9d2c3] bg-white/95 px-3 py-3 shadow-[0_10px_35px_rgba(21,23,22,0.04)] backdrop-blur md:px-5 lg:px-8">
-          <div className="mx-auto flex max-w-[1600px] flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3">
             <div>
               <div>
                 <p className="text-[9px] font-bold uppercase tracking-[0.24em] text-[#7b8a67] sm:text-[10px] sm:tracking-[0.32em]">
@@ -932,42 +984,74 @@ export function BookingAdmin() {
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto] sm:items-center xl:min-w-[640px]">
-              <nav className="grid grid-cols-3 gap-1.5 sm:gap-2">
-                {adminSections.map((section) => {
-                  const isActive = activeAdminSection === section.id;
+            <div className="flex shrink-0 justify-end">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setProfileMenuOpen((current) => !current)}
+                  className="flex min-h-10 items-center justify-center gap-2 border border-[#dfe6d8] px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-[#586256] transition-colors hover:border-[#151716] hover:text-[#151716] sm:px-4"
+                  aria-expanded={profileMenuOpen}
+                  aria-label="ადმინის მენიუ"
+                >
+                  <span className="grid h-7 w-7 place-items-center rounded-full bg-[#151716] text-xs text-white">
+                    ა
+                  </span>
+                  მენიუ
+                </button>
 
-                  return (
+                {profileMenuOpen ? (
+                  <div className="absolute right-0 top-12 z-50 w-56 border border-[#dfe6d8] bg-white p-1 shadow-[0_18px_45px_rgba(21,23,22,0.16)]">
+                    {adminSections.map((section) => {
+                      const isActive = activeAdminSection === section.id;
+
+                      return (
+                        <button
+                          key={section.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveAdminSection(section.id);
+                            setProfileMenuOpen(false);
+                          }}
+                          className={`block w-full px-3 py-3 text-left text-[10px] font-black uppercase tracking-[0.14em] transition-colors ${
+                            isActive
+                              ? "bg-[#151716] text-white"
+                              : "text-[#151716] hover:bg-[#f2f5ee]"
+                          }`}
+                        >
+                          {section.label}
+                        </button>
+                      );
+                    })}
                     <button
-                      key={section.id}
                       type="button"
-                      onClick={() => setActiveAdminSection(section.id)}
-                      className={`min-h-10 border px-2 py-2 text-center text-[10px] font-black uppercase tracking-normal transition-colors sm:px-4 sm:text-xs sm:tracking-[0.14em] ${
-                        isActive
-                          ? "border-[#151716] bg-[#151716] text-white"
-                          : "border-[#dfe6d8] text-[#586256] hover:border-[#151716] hover:text-[#151716]"
+                      onClick={() => {
+                        setActiveAdminSection("archive");
+                        setProfileMenuOpen(false);
+                      }}
+                      className={`block w-full px-3 py-3 text-left text-[10px] font-black uppercase tracking-[0.14em] transition-colors ${
+                        activeAdminSection === "archive"
+                          ? "bg-[#151716] text-white"
+                          : "text-[#151716] hover:bg-[#f2f5ee]"
                       }`}
                     >
-                      {section.label}
+                      შესრულებული
                     </button>
-                  );
-                })}
-              </nav>
-
-              <a
-                href="/"
-                className="border border-[#dfe6d8] px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.14em] text-[#586256] transition-colors hover:border-[#151716] hover:text-[#151716] sm:whitespace-nowrap"
-              >
-                მთავარი
-              </a>
-
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="border border-[#dfe6d8] px-4 py-3 text-center text-[10px] font-black uppercase tracking-[0.14em] text-[#586256] transition-colors hover:border-[#151716] hover:text-[#151716] sm:whitespace-nowrap"
-              >
-                გამოსვლა
-              </button>
+                    <a
+                      href="/"
+                      className="block px-3 py-3 text-[10px] font-black uppercase tracking-[0.14em] text-[#586256] transition-colors hover:bg-[#f2f5ee] hover:text-[#151716]"
+                    >
+                      მთავარი
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleSignOut}
+                      className="block w-full px-3 py-3 text-left text-[10px] font-black uppercase tracking-[0.14em] text-red-600 transition-colors hover:bg-red-50"
+                    >
+                      გამოსვლა
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
 
           </div>
@@ -979,19 +1063,23 @@ export function BookingAdmin() {
               <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.35em] text-[#7b8a67]">
                 მართვა
               </p>
-              <h2 className="text-3xl font-black uppercase tracking-normal md:text-5xl">
+              <h2 className="text-2xl font-black uppercase tracking-normal md:text-4xl">
                 {activeAdminSection === "booking"
                   ? "ჯავშნები"
                   : activeAdminSection === "service"
                     ? "სერვისები"
-                    : "სპეციალისტები"}
+                    : activeAdminSection === "specialist"
+                      ? "სპეციალისტები"
+                      : "შესრულებული"}
               </h2>
             </div>
             <div className="flex flex-col gap-2 sm:items-end">
               <p className="text-xs font-bold tracking-widest text-[#7b8a67]">
-                სულ: {activeBookings.length} აქტიური
+                {activeAdminSection === "archive"
+                  ? `სულ: ${completedBookings.length} შესრულებული`
+                  : `სულ: ${activeBookings.length} აქტიური`}
               </p>
-              {activeAdminSection === "booking" ? (
+              {activeAdminSection === "booking" || activeAdminSection === "archive" ? (
                 <button
                   type="button"
                   onClick={exportBookingsToCsv}
@@ -1009,6 +1097,172 @@ export function BookingAdmin() {
 
           <div className={activeAdminSection === "specialist" ? "block" : "hidden"}>
             <SpecialistAdmin />
+          </div>
+
+          <div className={activeAdminSection === "archive" ? "block" : "hidden"}>
+            <section className="border border-[#c9d2c3] bg-white p-4 shadow-[0_15px_40px_rgba(21,23,22,0.02)] sm:p-6">
+              <div className="mb-6 flex flex-col gap-3 border-b border-[#c9d2c3] pb-5 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.3em] text-[#7b8a67]">
+                    არქივი
+                  </p>
+                  <h2 className="text-2xl font-black tracking-normal">
+                    შესრულებული ჯავშნები
+                  </h2>
+                </div>
+                <p className="text-xs font-bold text-[#586256]">
+                  {filteredCompletedBookings.length} / {completedBookings.length} ჩანაწერი
+                </p>
+              </div>
+
+              <div className="mb-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                <label className="border-b border-[#c9d2c3] pb-2">
+                  <span className="mb-1 block text-[9px] font-bold uppercase tracking-[0.24em] text-[#7b8a67]">
+                    ძებნა
+                  </span>
+                  <input
+                    type="search"
+                    value={archiveSearch}
+                    onChange={(event) => {
+                      setArchiveSearch(event.target.value);
+                      setArchivePage(1);
+                    }}
+                    placeholder="სახელი, ტელეფონი, თარიღი, სპეციალისტი ან სერვისი"
+                    className="w-full bg-transparent text-sm font-bold text-[#151716] placeholder:text-[#9aa697] focus:outline-none"
+                  />
+                </label>
+                {archiveSearch ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setArchiveSearch("");
+                      setArchivePage(1);
+                    }}
+                    className="border border-[#dfe6d8] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.14em] text-[#586256] transition-colors hover:border-[#151716] hover:text-[#151716]"
+                  >
+                    გასუფთავება
+                  </button>
+                ) : null}
+              </div>
+
+              {completedBookings.length ? (
+                filteredCompletedBookings.length ? (
+                <>
+                  <div className="grid gap-2">
+                  {paginatedCompletedBookings.map((booking) => {
+                    const linkedServices = bookingServicesByBookingId[booking.id] || [];
+                    const fallbackService = services.find(
+                      (service) => service.id === booking.service_id
+                    );
+                    const bookingServices = linkedServices.length
+                      ? linkedServices
+                      : fallbackService
+                        ? [fallbackService]
+                        : [];
+                    const specialistName =
+                      specialists.find(
+                        (specialist) => specialist.id === booking.specialist_id
+                      )?.name || "სპეციალისტი არ არის";
+
+                    return (
+                      <div
+                        key={booking.id}
+                        className="grid gap-3 border border-[#d9ead0] bg-[#f2f8ed] p-3 sm:grid-cols-[150px_1fr_auto] sm:items-start"
+                      >
+                        <div>
+                          <p className="text-sm font-black text-green-900">
+                            {booking.booking_date}
+                          </p>
+                          <p className="mt-1 text-xs font-bold text-green-900/70">
+                            {booking.start_time.substring(0, 5)} -{" "}
+                            {booking.end_time.substring(0, 5)}
+                          </p>
+                          <p className="mt-2 inline-block bg-green-800 px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white">
+                            {getBookingStatusLabel(booking.status)}
+                          </p>
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="grid gap-1 text-xs font-semibold text-green-900/75 sm:grid-cols-2">
+                            <span className="font-black text-green-950">
+                              {booking.client_name}
+                            </span>
+                            <span>{booking.client_phone}</span>
+                            <span>{specialistName}</span>
+                            <span>{booking.booking_source || "არ არის"}</span>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            {bookingServices.length ? (
+                              bookingServices.map((service) => (
+                                <span
+                                  key={`${booking.id}-${service.id}`}
+                                  className="border border-[#c8dec0] bg-white px-2 py-1 text-[10px] font-black text-green-900"
+                                >
+                                  {service.title} · {formatDuration(service.duration_minutes)}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="border border-[#c8dec0] bg-white px-2 py-1 text-[10px] font-black text-green-900/70">
+                                სერვისი არ არის არჩეული
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(booking.id)}
+                          className="flex items-center justify-center gap-2 border border-transparent px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-red-600 transition-colors hover:border-red-200 hover:bg-red-50 sm:justify-start"
+                        >
+                          <TrashIcon />
+                          წაშლა
+                        </button>
+                      </div>
+                    );
+                  })}
+                  </div>
+
+                  <div className="mt-5 flex flex-col gap-3 border-t border-[#dfe6d8] pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs font-bold text-[#586256]">
+                      გვერდი {currentArchivePage} / {archivePageCount}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={currentArchivePage === 1}
+                        onClick={() =>
+                          setArchivePage((current) => Math.max(1, current - 1))
+                        }
+                        className="border border-[#dfe6d8] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.14em] text-[#586256] transition-colors hover:border-[#151716] hover:text-[#151716] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        წინა
+                      </button>
+                      <button
+                        type="button"
+                        disabled={currentArchivePage === archivePageCount}
+                        onClick={() =>
+                          setArchivePage((current) =>
+                            Math.min(archivePageCount, current + 1)
+                          )
+                        }
+                        className="border border-[#dfe6d8] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.14em] text-[#586256] transition-colors hover:border-[#151716] hover:text-[#151716] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        შემდეგი
+                      </button>
+                    </div>
+                  </div>
+                </>
+                ) : (
+                  <p className="border border-[#d9ead0] bg-[#f2f8ed] p-4 text-sm font-semibold text-green-800">
+                    ძებნით ჩანაწერი ვერ მოიძებნა.
+                  </p>
+                )
+              ) : (
+                <p className="border border-[#d9ead0] bg-[#f2f8ed] p-4 text-sm font-semibold text-green-800">
+                  შესრულებული ჯავშნები ჯერ არ არის.
+                </p>
+              )}
+            </section>
           </div>
 
           <div className={activeAdminSection === "booking" ? "block" : "hidden"}>
@@ -1455,9 +1709,6 @@ export function BookingAdmin() {
                   {selectedDayOverdueBookings.length
                     ? ` / ${selectedDayOverdueBookings.length} ვადაგასული`
                     : ""}
-                  {selectedDayCompletedBookings.length
-                    ? ` / ${selectedDayCompletedBookings.length} შესრულებული`
-                    : ""}
                 </p>
               </div>
 
@@ -1590,89 +1841,6 @@ export function BookingAdmin() {
                     );
                   })
                 )}
-
-                {selectedDayCompletedBookings.length ? (
-                  <div className="mt-5 border-t border-[#dfe6d8] pt-4">
-                    <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.22em] text-green-800">
-                      შესრულებული
-                    </p>
-                    <div className="space-y-2">
-                      {selectedDayCompletedBookings.map((booking) => {
-                        const linkedServices = bookingServicesByBookingId[booking.id] || [];
-                        const fallbackService = services.find(
-                          (service) => service.id === booking.service_id
-                        );
-                        const bookingServices = linkedServices.length
-                          ? linkedServices
-                          : fallbackService
-                            ? [fallbackService]
-                            : [];
-
-                        return (
-                          <div
-                            key={booking.id}
-                            className="border border-[#d9ead0] bg-[#f2f8ed] p-3 opacity-85"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex flex-col gap-1 text-xs font-semibold text-green-900/75">
-                                <span className="text-sm font-black text-green-900">
-                                  {booking.start_time.substring(0, 5)} -{" "}
-                                  {booking.end_time.substring(0, 5)}
-                                </span>
-                                <span>{booking.client_name}</span>
-                                <span>{booking.client_phone}</span>
-                                <span>
-                                  {specialists.find(
-                                    (specialist) => specialist.id === booking.specialist_id
-                                  )?.name || "სპეციალისტი არ არის"}
-                                </span>
-                                <div className="mt-2 flex flex-wrap gap-1.5">
-                                  {bookingServices.map((service) => (
-                                    <span
-                                      key={`${booking.id}-${service.id}`}
-                                      className="border border-[#c8dec0] bg-white px-2 py-1 text-[10px] font-black text-green-900"
-                                    >
-                                      {service.title} · {formatDuration(service.duration_minutes)}
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-
-                              <div className="relative shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setOpenBookingMenuId((current) =>
-                                      current === booking.id ? null : booking.id
-                                    )
-                                  }
-                                  className="grid h-9 w-9 place-items-center text-2xl font-black leading-none text-green-900/70 transition-colors hover:text-green-900"
-                                  aria-label="შესრულებული ჯავშნის მოქმედებები"
-                                  aria-expanded={openBookingMenuId === booking.id}
-                                >
-                                  ⋮
-                                </button>
-
-                                {openBookingMenuId === booking.id ? (
-                                  <div className="absolute right-0 top-10 z-20 w-32 bg-white p-1 shadow-[0_14px_35px_rgba(21,23,22,0.14)]">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDelete(booking.id)}
-                                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[10px] font-bold uppercase tracking-[0.14em] text-red-600 transition-colors hover:bg-red-50"
-                                    >
-                                      <TrashIcon />
-                                      წაშლა
-                                    </button>
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
               </div>
             </section>
 

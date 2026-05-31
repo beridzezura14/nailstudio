@@ -13,7 +13,7 @@ export default function AboutValues() {
           <p className="mb-4 text-xs font-black uppercase tracking-[0.34em] text-[#7b8a67]">
             როგორ ვმუშაობთ
           </p>
-          <h2 className="text-3xl font-black uppercase leading-none tracking-normal sm:text-5xl">
+          <h2 className="text-2xl font-black uppercase leading-none tracking-normal sm:text-4xl">
             მთავარი პრინციპები
           </h2>
         </div>

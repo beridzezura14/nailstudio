@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { absoluteUrl, siteConfig } from "@/lib/seo";
+import ScrollToTop from "./components/ScrollToTop";
 import ToastHost from "./components/ToastHost";
 import "./globals.css";
 
@@ -77,6 +78,7 @@ export default function RootLayout({
   return (
     <html lang="ka" className={capsFont.variable}>
       <body>
+        <ScrollToTop />
         {children}
         <ToastHost />
       </body>

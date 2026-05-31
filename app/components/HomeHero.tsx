@@ -1,17 +1,15 @@
-import Image from "next/image";
 import Link from "next/link";
 
 export default function HomeHero() {
   return (
     <section className="relative min-h-[calc(100svh-62px)] overflow-hidden border-b border-[#d5ddd0]">
       <div className="absolute inset-0">
-        <Image
-          src="https://images.unsplash.com/photo-1610992015762-45dca7fa3a85?auto=format&fit=crop&w=1800&q=85"
-          alt="ფრჩხილის სტუდიის ინტერიერი"
-          fill
-          priority
-          sizes="100vw"
-          className="h-full w-full object-cover"
+        <div
+          className="h-full w-full bg-cover bg-center bg-fixed"
+          style={{
+            backgroundImage:
+              "url(https://images.unsplash.com/photo-1610992015762-45dca7fa3a85?auto=format&fit=crop&w=1800&q=85)",
+          }}
         />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(21,23,22,0.84),rgba(21,23,22,0.48)_52%,rgba(21,23,22,0.16))]" />
       </div>
@@ -21,7 +19,7 @@ export default function HomeHero() {
           <p className="mb-5 text-xs font-bold uppercase tracking-[0.34em] text-[#dfe8d5] sm:tracking-[0.42em]">
             პრემიუმ ფრჩხილის მოვლა თბილისში
           </p>
-          <h1 className="max-w-4xl text-4xl font-black uppercase leading-[0.9] tracking-normal sm:text-6xl">
+          <h1 className="max-w-4xl text-3xl font-black uppercase leading-[0.9] tracking-normal sm:text-5xl">
             დახვეწილი ფრჩხილები მშვიდი ლუქსის შეგრძნებით
           </h1>
           <div className="mt-8 grid max-w-3xl gap-5 border-t border-white/30 pt-6 md:grid-cols-[1fr_auto] md:items-center">

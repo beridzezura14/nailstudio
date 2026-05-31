@@ -18,7 +18,7 @@ export default function HomeAboutPreview() {
           <p className="mb-4 text-xs font-black uppercase tracking-[0.34em] text-[#7b8a67]">
             ჩვენ შესახებ
           </p>
-          <h2 className="text-4xl font-black uppercase leading-none tracking-normal sm:text-5xl md:text-6xl">
+          <h2 className="text-3xl font-black uppercase leading-none tracking-normal sm:text-4xl md:text-5xl">
             სუფთა პროცესი და მშვიდი შედეგი
           </h2>
           <p className="mt-6 max-w-2xl text-sm leading-7 text-[#586256] sm:text-base sm:leading-8">
