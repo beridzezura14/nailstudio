@@ -5,7 +5,7 @@ export default function HomeHero() {
     <section className="relative min-h-[calc(100svh-62px)] overflow-hidden border-b border-[#d5ddd0]">
       <div className="absolute inset-0">
         <div
-          className="h-full w-full bg-cover bg-center"
+          className="h-full w-full bg-cover bg-center lg:bg-fixed"
           style={{
             backgroundImage:
               "url(https://images.unsplash.com/photo-1610992015762-45dca7fa3a85?auto=format&fit=crop&w=1800&q=85)",
