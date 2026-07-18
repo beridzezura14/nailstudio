@@ -20,7 +20,7 @@ export default function HomeHero() {
             პრემიუმ ფრჩხილის მოვლა თბილისში
           </p>
           <h1 className="max-w-4xl text-3xl font-black uppercase leading-[0.9] tracking-normal sm:text-5xl">
-            დახვეწილი ფრჩხილები მშვიდი ლუქსის შეგრძნებით
+            ფრჩხილის მოვლა მშვიდი, ზუსტი და სუფთა პროცესით
           </h1>
           <div className="mt-8 grid max-w-3xl gap-5 border-t border-white/30 pt-6 md:grid-cols-[1fr_auto] md:items-center">
             <p className="text-sm leading-7 text-white/84 sm:text-base sm:leading-8">
